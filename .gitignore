@@ -1,0 +1,67 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Entorno virtual
+venv/
+env/
+ENV/
+.venv
+
+# Variables de entorno (SECRETOS)
+.env
+
+# Base de datos
+*.db
+*.sqlite
+*.sqlite3
+
+# Logs
+logs/*.log
+*.log
+
+# Archivos procesados
+data/ingresos/*.pdf
+data/ingresos/*.png
+data/ingresos/*.jpg
+data/egresos/*.pdf
+data/egresos/*.png
+data/egresos/*.jpg
+data/procesados/*
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Temporal
+temp/
+tmp/
+*.tmp
+
+# Streamlit
+.streamlit/secrets.toml

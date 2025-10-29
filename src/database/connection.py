@@ -105,52 +105,25 @@ class Database:
             raise
 
     @contextmanager
-    def get_session(self, max_reintentos: int = 3):
+    def get_session(self):
         """
-        Context manager para obtener una sesión de base de datos con reintentos
+        Context manager para obtener una sesión de base de datos
 
         Uso:
             with db.get_session() as session:
                 session.add(objeto)
                 session.commit()
-
-        Args:
-            max_reintentos: Número máximo de reintentos en caso de error de conexión
         """
-        session = None
-        intento = 0
-
-        while intento < max_reintentos:
-            intento += 1
-            session = self.SessionLocal()
-
-            try:
-                yield session
-                session.commit()
-                return  # Éxito, salir
-
-            except (OperationalError, DBAPIError) as e:
-                session.rollback()
-                logger.warning(f"⚠️ Error de BD operacional (intento {intento}/{max_reintentos}): {e}")
-
-                if intento < max_reintentos:
-                    wait_time = 2 ** intento  # Backoff exponencial
-                    logger.info(f"⏳ Esperando {wait_time}s antes de reintentar...")
-                    time.sleep(wait_time)
-                    session.close()
-                    continue
-                else:
-                    logger.error(f"❌ Máximo de reintentos alcanzado para transacción BD")
-                    raise
-
-            except Exception as e:
-                session.rollback()
-                logger.error(f"❌ Error en transacción de BD: {type(e).__name__}: {e}")
-                raise
-
-            finally:
-                if session:
-                    session.close()
+        session = self.SessionLocal()
+        try:
+            yield session
+            session.commit()
+        except Exception as e:
+            session.rollback()
+            logger.error(f"❌ Error en transacción de BD: {type(e).__name__}: {e}")
+            raise
+        finally:
+            session.close()
 
     def get_session_sync(self):
         """

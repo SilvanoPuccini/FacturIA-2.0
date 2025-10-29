@@ -1,5 +1,5 @@
 """
-Database - Gestión de base de datos con SQLAlchemy
+Database - GestiÃ³n de base de datos con SQLAlchemy
 """
 from .models import Transaccion, TipoTransaccion, OrigenArchivo, ArchivoProcesado, LogProcesamiento, EstadisticasDiarias
 from .connection import Database, get_database, inicializar_base_datos
@@ -26,7 +26,7 @@ __all__ = [
     "ArchivoProcesado",
     "LogProcesamiento",
     "EstadisticasDiarias",
-    # Conexión
+    # ConexiÃ³n
     "Database",
     "get_database",
     "inicializar_base_datos",

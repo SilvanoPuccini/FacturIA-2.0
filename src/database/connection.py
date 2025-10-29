@@ -2,13 +2,15 @@
 Gestión de conexión a la base de datos
 Configuración de SQLAlchemy y gestión de sesiones
 """
-from sqlalchemy import create_engine, event
+from sqlalchemy import create_engine, event, text
 from sqlalchemy.orm import sessionmaker, scoped_session
 from sqlalchemy.pool import StaticPool
+from sqlalchemy.exc import OperationalError, DBAPIError
 from contextlib import contextmanager
 from loguru import logger
 from pathlib import Path
 import os
+import time
 
 from .models import Base
 
@@ -60,7 +62,13 @@ class Database:
                     echo=False,
                     pool_size=10,
                     max_overflow=20,
-                    pool_pre_ping=True  # Verificar conexiones antes de usar
+                    pool_pre_ping=True,  # Verificar conexiones antes de usar
+                    pool_recycle=3600,  # Reciclar conexiones cada hora
+                    pool_timeout=30,  # Timeout de 30s al obtener conexión del pool
+                    connect_args={
+                        "connect_timeout": 10,  # Timeout de conexión de 10s
+                        "options": "-c statement_timeout=30000"  # Timeout de statement 30s
+                    }
                 )
 
             # Crear SessionLocal
@@ -97,25 +105,52 @@ class Database:
             raise
 
     @contextmanager
-    def get_session(self):
+    def get_session(self, max_reintentos: int = 3):
         """
-        Context manager para obtener una sesión de base de datos
+        Context manager para obtener una sesión de base de datos con reintentos
 
         Uso:
             with db.get_session() as session:
                 session.add(objeto)
                 session.commit()
+
+        Args:
+            max_reintentos: Número máximo de reintentos en caso de error de conexión
         """
-        session = self.SessionLocal()
-        try:
-            yield session
-            session.commit()
-        except Exception as e:
-            session.rollback()
-            logger.error(f"Error en transacción de BD: {e}")
-            raise
-        finally:
-            session.close()
+        session = None
+        intento = 0
+
+        while intento < max_reintentos:
+            intento += 1
+            session = self.SessionLocal()
+
+            try:
+                yield session
+                session.commit()
+                return  # Éxito, salir
+
+            except (OperationalError, DBAPIError) as e:
+                session.rollback()
+                logger.warning(f"⚠️ Error de BD operacional (intento {intento}/{max_reintentos}): {e}")
+
+                if intento < max_reintentos:
+                    wait_time = 2 ** intento  # Backoff exponencial
+                    logger.info(f"⏳ Esperando {wait_time}s antes de reintentar...")
+                    time.sleep(wait_time)
+                    session.close()
+                    continue
+                else:
+                    logger.error(f"❌ Máximo de reintentos alcanzado para transacción BD")
+                    raise
+
+            except Exception as e:
+                session.rollback()
+                logger.error(f"❌ Error en transacción de BD: {type(e).__name__}: {e}")
+                raise
+
+            finally:
+                if session:
+                    session.close()
 
     def get_session_sync(self):
         """
@@ -135,21 +170,42 @@ class Database:
         except Exception as e:
             logger.error(f"Error al cerrar BD: {e}")
 
-    def verificar_conexion(self) -> bool:
+    def verificar_conexion(self, max_reintentos: int = 3, timeout: int = 5) -> bool:
         """
-        Verifica que la conexión a la base de datos funcione
+        Verifica que la conexión a la base de datos funcione con reintentos
+
+        Args:
+            max_reintentos: Número máximo de reintentos
+            timeout: Timeout en segundos para cada intento
 
         Returns:
             True si la conexión es exitosa
         """
-        try:
-            with self.engine.connect() as conn:
-                conn.execute("SELECT 1")
-            logger.info("✅ Conexión a base de datos verificada")
-            return True
-        except Exception as e:
-            logger.error(f"❌ Error al verificar conexión a BD: {e}")
-            return False
+        for intento in range(1, max_reintentos + 1):
+            try:
+                with self.engine.connect() as conn:
+                    # Usar text() para la consulta SQL
+                    result = conn.execute(text("SELECT 1"))
+                    result.close()
+
+                logger.info("✅ Conexión a base de datos verificada")
+                return True
+
+            except (OperationalError, DBAPIError) as e:
+                logger.warning(f"⚠️ Error al verificar conexión BD (intento {intento}/{max_reintentos}): {e}")
+                if intento < max_reintentos:
+                    wait_time = 2 ** intento
+                    logger.info(f"⏳ Esperando {wait_time}s antes de reintentar...")
+                    time.sleep(wait_time)
+                else:
+                    logger.error(f"❌ No se pudo verificar conexión a BD después de {max_reintentos} intentos")
+                    return False
+
+            except Exception as e:
+                logger.error(f"❌ Error inesperado al verificar conexión a BD: {type(e).__name__}: {e}")
+                return False
+
+        return False
 
     def obtener_estadisticas(self) -> dict:
         """

@@ -116,21 +116,58 @@ class FacturiaOrchestrator:
             logger.error(f"❌ Error en ciclo de procesamiento: {e}")
             logger.exception(e)
 
-    def leer_emails(self):
-        """Lee emails no leídos con adjuntos"""
-        try:
-            if not self.gmail_reader.connected:
-                self.gmail_reader.conectar()
+    def leer_emails(self, max_reintentos: int = 3):
+        """
+        Lee emails no leídos con adjuntos con reconexión automática
 
-            emails = self.gmail_reader.obtener_emails_no_leidos()
+        Args:
+            max_reintentos: Número máximo de reintentos de conexión
 
-            logger.info(f"📬 {len(emails)} emails con adjuntos encontrados")
+        Returns:
+            Lista de emails con adjuntos
+        """
+        for intento in range(1, max_reintentos + 1):
+            try:
+                # Verificar y reconectar si es necesario
+                if not self.gmail_reader.connected:
+                    logger.info(f"🔄 Conectando a Gmail (intento {intento}/{max_reintentos})...")
+                    if not self.gmail_reader.conectar():
+                        if intento < max_reintentos:
+                            wait_time = 2 ** intento
+                            logger.info(f"⏳ Esperando {wait_time}s antes de reintentar...")
+                            time.sleep(wait_time)
+                            continue
+                        else:
+                            logger.error("❌ No se pudo conectar a Gmail después de reintentos")
+                            return []
 
-            return emails
+                # Obtener emails (ya tiene reintentos internos)
+                emails = self.gmail_reader.obtener_emails_no_leidos()
 
-        except Exception as e:
-            logger.error(f"❌ Error al leer emails: {e}")
-            return []
+                if emails is not None:
+                    logger.info(f"📬 {len(emails)} emails con adjuntos encontrados")
+                    return emails
+                else:
+                    # Si obtener_emails_no_leidos retorna None por error de conexión
+                    if intento < max_reintentos:
+                        wait_time = 2 ** intento
+                        logger.warning(f"⚠️ Error al obtener emails, reintentando en {wait_time}s...")
+                        time.sleep(wait_time)
+                        self.gmail_reader.connected = False  # Forzar reconexión
+                        continue
+                    else:
+                        return []
+
+            except Exception as e:
+                logger.error(f"❌ Error al leer emails (intento {intento}/{max_reintentos}): {e}")
+                if intento < max_reintentos:
+                    wait_time = 2 ** intento
+                    time.sleep(wait_time)
+                    self.gmail_reader.connected = False
+                else:
+                    return []
+
+        return []
 
     def descargar_adjuntos(self, emails):
         """Descarga adjuntos de los emails"""
@@ -363,22 +400,61 @@ class FacturiaOrchestrator:
         self.guardar_transacciones(transacciones)
 
     def iniciar_monitoreo(self):
-        """Inicia el monitoreo continuo de emails"""
+        """Inicia el monitoreo continuo de emails con manejo robusto de errores"""
         logger.info(f"👀 Monitoreo iniciado - Revisando cada {EMAIL_CHECK_INTERVAL} minutos")
 
+        errores_consecutivos = 0
+        max_errores_antes_pausa = 5
+
         # Procesar archivos pendientes al inicio
-        self.procesar_archivos_pendientes()
+        try:
+            self.procesar_archivos_pendientes()
+        except Exception as e:
+            logger.error(f"⚠️ Error al procesar archivos pendientes: {e}")
 
         # Ejecutar primer ciclo inmediatamente
-        self.ciclo_completo()
+        try:
+            self.ciclo_completo()
+            errores_consecutivos = 0
+        except Exception as e:
+            logger.error(f"❌ Error en primer ciclo: {e}")
+            errores_consecutivos += 1
 
         # Programar ciclos periódicos
-        schedule.every(EMAIL_CHECK_INTERVAL).minutes.do(self.ciclo_completo)
+        def ciclo_con_manejo_errores():
+            """Wrapper que maneja errores del ciclo"""
+            nonlocal errores_consecutivos
 
-        # Loop infinito
+            try:
+                self.ciclo_completo()
+                errores_consecutivos = 0  # Reset en éxito
+            except Exception as e:
+                errores_consecutivos += 1
+                logger.error(f"❌ Error en ciclo (error #{errores_consecutivos}): {e}")
+                logger.exception(e)
+
+                if errores_consecutivos >= max_errores_antes_pausa:
+                    pausa = min(60 * errores_consecutivos, 600)  # Máximo 10 min
+                    logger.warning(f"⚠️ {errores_consecutivos} errores consecutivos - pausando {pausa}s")
+                    time.sleep(pausa)
+
+        schedule.every(EMAIL_CHECK_INTERVAL).minutes.do(ciclo_con_manejo_errores)
+
+        # Loop infinito con manejo de errores
+        logger.info("♾️  Loop de monitoreo iniciado")
         while True:
-            schedule.run_pending()
-            time.sleep(30)  # Revisar cada 30 segundos si hay tareas pendientes
+            try:
+                schedule.run_pending()
+                time.sleep(30)  # Revisar cada 30 segundos si hay tareas pendientes
+
+            except KeyboardInterrupt:
+                logger.info("\n⏸️  Monitoreo detenido por usuario")
+                raise
+
+            except Exception as e:
+                logger.error(f"❌ Error en loop de monitoreo: {e}")
+                logger.exception(e)
+                time.sleep(60)  # Pausa antes de continuar
 
 
 def main():

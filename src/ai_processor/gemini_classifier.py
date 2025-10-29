@@ -8,6 +8,8 @@ from typing import Dict, Optional, List
 import json
 from loguru import logger
 import sys
+import time
+from functools import wraps
 
 # Configurar logger
 logger.remove()
@@ -18,25 +20,156 @@ logger.add("logs/ai_processor.log", rotation="10 MB", level="DEBUG")
 class GeminiClassifier:
     """Clasificador de documentos financieros usando Gemini Vision"""
 
-    def __init__(self, api_key: str, prompt_template: str):
+    def __init__(self, api_key: str, prompt_template: str, timeout: int = 60, max_reintentos: int = 3):
         """
         Inicializa el clasificador Gemini
 
         Args:
             api_key: API key de Google Gemini
             prompt_template: Template del prompt para clasificación
+            timeout: Timeout para llamadas a API en segundos (default: 60)
+            max_reintentos: Número máximo de reintentos en caso de fallo (default: 3)
         """
         self.api_key = api_key
         self.prompt_template = prompt_template
+        self.timeout = timeout
+        self.max_reintentos = max_reintentos
+        self._circuit_breaker_failures = 0
+        self._circuit_breaker_threshold = 5
+        self._circuit_breaker_reset_time = None
 
         # Configurar Gemini
         try:
             genai.configure(api_key=api_key)
-            self.model = genai.GenerativeModel('gemini-1.5-flash')
+
+            # Configurar generación con timeout implícito
+            generation_config = {
+                "temperature": 0.1,
+                "top_p": 0.95,
+                "max_output_tokens": 1024,
+            }
+
+            self.model = genai.GenerativeModel(
+                'gemini-1.5-flash',
+                generation_config=generation_config
+            )
             logger.info("✅ Gemini Vision configurado correctamente")
         except Exception as e:
             logger.error(f"❌ Error al configurar Gemini: {e}")
             raise
+
+    def _verificar_circuit_breaker(self) -> bool:
+        """
+        Verifica si el circuit breaker está abierto (demasiados fallos)
+
+        Returns:
+            True si se puede continuar, False si el circuit breaker está abierto
+        """
+        # Si hay un tiempo de reset, verificar si ya pasó
+        if self._circuit_breaker_reset_time:
+            if time.time() > self._circuit_breaker_reset_time:
+                logger.info("🔄 Circuit breaker: reiniciando contador de fallos")
+                self._circuit_breaker_failures = 0
+                self._circuit_breaker_reset_time = None
+            else:
+                tiempo_restante = int(self._circuit_breaker_reset_time - time.time())
+                logger.warning(f"⚡ Circuit breaker ABIERTO - esperando {tiempo_restante}s antes de reintentar")
+                return False
+
+        # Si alcanzamos el umbral, abrir el circuit breaker
+        if self._circuit_breaker_failures >= self._circuit_breaker_threshold:
+            self._circuit_breaker_reset_time = time.time() + 60  # Esperar 60 segundos
+            logger.error(f"⚡ Circuit breaker ABIERTO por {self._circuit_breaker_failures} fallos consecutivos")
+            return False
+
+        return True
+
+    def _registrar_exito_api(self):
+        """Registra un llamado exitoso a la API"""
+        if self._circuit_breaker_failures > 0:
+            logger.info(f"✅ API recuperada - reseteando circuit breaker ({self._circuit_breaker_failures} fallos)")
+        self._circuit_breaker_failures = 0
+        self._circuit_breaker_reset_time = None
+
+    def _registrar_fallo_api(self):
+        """Registra un fallo en la API"""
+        self._circuit_breaker_failures += 1
+        logger.warning(f"⚠️ Fallo API registrado ({self._circuit_breaker_failures}/{self._circuit_breaker_threshold})")
+
+    def _llamar_gemini_con_reintentos(self, prompt: str, imagen: Image.Image) -> Optional[str]:
+        """
+        Llama a Gemini con reintentos y backoff exponencial
+
+        Args:
+            prompt: Prompt para Gemini
+            imagen: Imagen a analizar
+
+        Returns:
+            Texto de respuesta o None si falla
+        """
+        # Verificar circuit breaker
+        if not self._verificar_circuit_breaker():
+            return None
+
+        for intento in range(1, self.max_reintentos + 1):
+            try:
+                logger.info(f"🤖 Llamando a Gemini Vision (intento {intento}/{self.max_reintentos})...")
+
+                # Llamar a Gemini (la API de Google no tiene timeout directo, pero podemos usar signal o threading)
+                response = self.model.generate_content([prompt, imagen])
+
+                # Si llegamos aquí, fue exitoso
+                self._registrar_exito_api()
+                return response.text.strip()
+
+            except Exception as e:
+                error_msg = str(e).lower()
+
+                # Rate limiting
+                if "quota" in error_msg or "rate" in error_msg or "429" in error_msg:
+                    logger.warning(f"⏱️ Rate limit alcanzado (intento {intento}/{self.max_reintentos})")
+                    self._registrar_fallo_api()
+                    if intento < self.max_reintentos:
+                        wait_time = min(2 ** intento, 30)  # Backoff exponencial, máx 30s
+                        logger.info(f"⏳ Esperando {wait_time}s por rate limit...")
+                        time.sleep(wait_time)
+                        continue
+
+                # Timeout o error de red
+                elif "timeout" in error_msg or "connection" in error_msg or "network" in error_msg:
+                    logger.warning(f"🌐 Error de conexión/timeout (intento {intento}/{self.max_reintentos}): {e}")
+                    self._registrar_fallo_api()
+                    if intento < self.max_reintentos:
+                        wait_time = 2 ** intento  # Backoff exponencial
+                        logger.info(f"⏳ Esperando {wait_time}s antes de reintentar...")
+                        time.sleep(wait_time)
+                        continue
+
+                # Error de API (500, 503, etc.)
+                elif "500" in error_msg or "503" in error_msg or "unavailable" in error_msg:
+                    logger.warning(f"⚠️ API temporalmente no disponible (intento {intento}/{self.max_reintentos})")
+                    self._registrar_fallo_api()
+                    if intento < self.max_reintentos:
+                        wait_time = 2 ** intento
+                        logger.info(f"⏳ Esperando {wait_time}s antes de reintentar...")
+                        time.sleep(wait_time)
+                        continue
+
+                # Otro error
+                else:
+                    logger.error(f"❌ Error en Gemini API: {type(e).__name__}: {e}")
+                    self._registrar_fallo_api()
+                    if intento < self.max_reintentos:
+                        wait_time = 2 ** intento
+                        time.sleep(wait_time)
+                        continue
+
+                # Si llegamos aquí en el último intento, retornar None
+                if intento == self.max_reintentos:
+                    logger.error(f"❌ Máximo de reintentos alcanzado para Gemini API")
+                    return None
+
+        return None
 
     def clasificar_imagen(self, imagen: Image.Image, contexto: str = "") -> Optional[Dict]:
         """
@@ -56,13 +189,12 @@ class GeminiClassifier:
             if contexto:
                 prompt = f"Contexto adicional: {contexto}\n\n{prompt}"
 
-            logger.info("🤖 Enviando imagen a Gemini Vision...")
+            # Llamar a Gemini Vision con reintentos y backoff
+            texto_respuesta = self._llamar_gemini_con_reintentos(prompt, imagen)
 
-            # Llamar a Gemini Vision
-            response = self.model.generate_content([prompt, imagen])
-
-            # Extraer texto de respuesta
-            texto_respuesta = response.text.strip()
+            if not texto_respuesta:
+                logger.warning("⚠️ No se obtuvo respuesta de Gemini después de reintentos")
+                return None
 
             logger.debug(f"Respuesta cruda de Gemini: {texto_respuesta[:200]}...")
 
@@ -78,11 +210,11 @@ class GeminiClassifier:
 
         except json.JSONDecodeError as e:
             logger.error(f"❌ Error al parsear JSON de Gemini: {e}")
-            logger.error(f"Respuesta: {texto_respuesta}")
+            logger.error(f"Respuesta: {texto_respuesta if 'texto_respuesta' in locals() else 'N/A'}")
             return None
 
         except Exception as e:
-            logger.error(f"❌ Error al clasificar imagen: {e}")
+            logger.error(f"❌ Error al clasificar imagen: {type(e).__name__}: {e}")
             return None
 
     def clasificar_documento(
@@ -210,15 +342,13 @@ class GeminiClassifier:
 
     def procesar_batch(
         self,
-        documentos: List[Dict],
-        max_reintentos: int = 2
+        documentos: List[Dict]
     ) -> List[Dict]:
         """
         Procesa un lote de documentos
 
         Args:
             documentos: Lista de documentos procesados por DocumentReader
-            max_reintentos: Reintentos máximos por documento
 
         Returns:
             Lista de resultados con clasificaciones
@@ -236,16 +366,8 @@ class GeminiClassifier:
             texto = doc.get("texto_extraido", "")
             contexto = f"Archivo: {doc.get('nombre')}"
 
-            # Intentar clasificar con reintentos
-            clasificacion = None
-            for intento in range(max_reintentos):
-                clasificacion = self.clasificar_documento(imagenes, texto, contexto)
-
-                if clasificacion:
-                    break
-
-                if intento < max_reintentos - 1:
-                    logger.warning(f"Reintentando clasificación... ({intento + 1}/{max_reintentos})")
+            # Clasificar (los reintentos ya están manejados internamente)
+            clasificacion = self.clasificar_documento(imagenes, texto, contexto)
 
             resultado = {
                 "ruta": doc.get("ruta"),

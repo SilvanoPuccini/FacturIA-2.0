@@ -9,6 +9,8 @@ from datetime import datetime
 from typing import List, Dict, Optional
 from loguru import logger
 import sys
+import time
+import socket
 
 # Configurar logger
 logger.remove()
@@ -19,42 +21,80 @@ logger.add("logs/email_monitor.log", rotation="10 MB", level="DEBUG")
 class GmailReader:
     """Cliente IMAP para leer emails de Gmail"""
 
-    def __init__(self, email_address: str, password: str):
+    def __init__(self, email_address: str, password: str, timeout: int = 30, max_reintentos: int = 3):
         """
         Inicializa el lector de Gmail
 
         Args:
             email_address: Email de Gmail
             password: App Password de Gmail (no la contraseña normal)
+            timeout: Timeout para conexiones IMAP en segundos (default: 30)
+            max_reintentos: Número máximo de reintentos en caso de fallo (default: 3)
         """
         self.email_address = email_address
         self.password = password
+        self.timeout = timeout
+        self.max_reintentos = max_reintentos
         self.imap = None
         self.connected = False
 
     def conectar(self) -> bool:
         """
-        Conecta al servidor IMAP de Gmail
+        Conecta al servidor IMAP de Gmail con reintentos y backoff exponencial
 
         Returns:
             True si la conexión fue exitosa
         """
-        try:
-            logger.info(f"Conectando a Gmail con {self.email_address}...")
-            self.imap = imaplib.IMAP4_SSL("imap.gmail.com", 993)
-            self.imap.login(self.email_address, self.password)
-            self.connected = True
-            logger.info("✅ Conectado exitosamente a Gmail")
-            return True
+        for intento in range(1, self.max_reintentos + 1):
+            try:
+                logger.info(f"Conectando a Gmail con {self.email_address}... (intento {intento}/{self.max_reintentos})")
 
-        except imaplib.IMAP4.error as e:
-            logger.error(f"❌ Error de autenticación IMAP: {e}")
-            logger.error("💡 Verifica que uses un App Password, no tu contraseña normal")
-            return False
+                # Establecer timeout para socket
+                socket.setdefaulttimeout(self.timeout)
 
-        except Exception as e:
-            logger.error(f"❌ Error al conectar a Gmail: {e}")
-            return False
+                # Conectar con timeout
+                self.imap = imaplib.IMAP4_SSL("imap.gmail.com", 993, timeout=self.timeout)
+                self.imap.login(self.email_address, self.password)
+                self.connected = True
+                logger.info("✅ Conectado exitosamente a Gmail")
+                return True
+
+            except imaplib.IMAP4.error as e:
+                logger.error(f"❌ Error de autenticación IMAP: {e}")
+                logger.error("💡 Verifica que uses un App Password, no tu contraseña normal")
+                # No reintentar en errores de autenticación
+                return False
+
+            except (socket.timeout, TimeoutError) as e:
+                logger.warning(f"⏱️ Timeout al conectar a Gmail (intento {intento}/{self.max_reintentos}): {e}")
+                if intento < self.max_reintentos:
+                    wait_time = 2 ** intento  # Backoff exponencial: 2, 4, 8 segundos
+                    logger.info(f"⏳ Esperando {wait_time}s antes del siguiente intento...")
+                    time.sleep(wait_time)
+                else:
+                    logger.error("❌ Máximo de reintentos alcanzado para conexión IMAP")
+                    return False
+
+            except (socket.error, ConnectionError, OSError) as e:
+                logger.warning(f"🌐 Error de red al conectar (intento {intento}/{self.max_reintentos}): {e}")
+                if intento < self.max_reintentos:
+                    wait_time = 2 ** intento  # Backoff exponencial
+                    logger.info(f"⏳ Esperando {wait_time}s antes del siguiente intento...")
+                    time.sleep(wait_time)
+                else:
+                    logger.error("❌ Máximo de reintentos alcanzado - error de red persistente")
+                    return False
+
+            except Exception as e:
+                logger.error(f"❌ Error inesperado al conectar a Gmail: {type(e).__name__}: {e}")
+                if intento < self.max_reintentos:
+                    wait_time = 2 ** intento
+                    logger.info(f"⏳ Esperando {wait_time}s antes del siguiente intento...")
+                    time.sleep(wait_time)
+                else:
+                    return False
+
+        return False
 
     def desconectar(self):
         """Cierra la conexión IMAP"""
@@ -64,56 +104,118 @@ class GmailReader:
                 self.imap.logout()
                 self.connected = False
                 logger.info("✅ Desconectado de Gmail")
-            except:
-                pass
+            except Exception as e:
+                logger.warning(f"⚠️ Error al desconectar (no crítico): {type(e).__name__}: {e}")
+                self.connected = False
 
-    def obtener_emails_no_leidos(self, carpeta: str = "INBOX") -> List[Dict]:
+    def _verificar_y_reconectar(self) -> bool:
+        """
+        Verifica si la conexión sigue activa y reconecta si es necesario
+
+        Returns:
+            True si hay conexión activa (existente o recién establecida)
+        """
+        if not self.connected:
+            logger.info("🔄 Conexión no activa, intentando conectar...")
+            return self.conectar()
+
+        # Intentar hacer un NOOP para verificar que la conexión sigue viva
+        try:
+            status = self.imap.noop()
+            if status[0] == 'OK':
+                return True
+        except Exception as e:
+            logger.warning(f"⚠️ Conexión perdida: {e}")
+            self.connected = False
+
+        # Si llegamos aquí, la conexión está muerta, intentar reconectar
+        logger.info("🔄 Reconectando a Gmail...")
+        return self.conectar()
+
+    def obtener_emails_no_leidos(self, carpeta: str = "INBOX", reintentos: int = 2) -> List[Dict]:
         """
         Obtiene todos los emails no leídos con adjuntos
 
         Args:
             carpeta: Carpeta de Gmail a revisar (default: INBOX)
+            reintentos: Número de reintentos en caso de error (default: 2)
 
         Returns:
             Lista de diccionarios con información de emails
         """
-        if not self.connected:
-            logger.warning("No hay conexión activa. Conectando...")
-            if not self.conectar():
+        for intento in range(1, reintentos + 1):
+            # Verificar y reconectar si es necesario
+            if not self._verificar_y_reconectar():
+                logger.error("❌ No se pudo establecer conexión con Gmail")
+                if intento < reintentos:
+                    wait_time = 2 ** intento
+                    logger.info(f"⏳ Esperando {wait_time}s antes de reintentar...")
+                    time.sleep(wait_time)
+                    continue
                 return []
 
-        try:
-            # Seleccionar carpeta
-            self.imap.select(carpeta)
+            try:
+                # Seleccionar carpeta
+                self.imap.select(carpeta)
 
-            # Buscar emails no leídos
-            status, messages = self.imap.search(None, "UNSEEN")
+                # Buscar emails no leídos
+                status, messages = self.imap.search(None, "UNSEEN")
 
-            if status != "OK":
-                logger.error(f"Error al buscar emails: {status}")
-                return []
+                if status != "OK":
+                    logger.error(f"Error al buscar emails: {status}")
+                    if intento < reintentos:
+                        wait_time = 2 ** intento
+                        time.sleep(wait_time)
+                        continue
+                    return []
 
-            email_ids = messages[0].split()
+                email_ids = messages[0].split()
 
-            if not email_ids:
-                logger.info("No hay emails no leídos")
-                return []
+                if not email_ids:
+                    logger.info("No hay emails no leídos")
+                    return []
 
-            logger.info(f"📬 Encontrados {len(email_ids)} emails no leídos")
+                logger.info(f"📬 Encontrados {len(email_ids)} emails no leídos")
 
-            emails_con_adjuntos = []
+                emails_con_adjuntos = []
 
-            for email_id in email_ids:
-                email_data = self._procesar_email(email_id)
-                if email_data and email_data.get("adjuntos"):
-                    emails_con_adjuntos.append(email_data)
+                for email_id in email_ids:
+                    email_data = self._procesar_email(email_id)
+                    if email_data and email_data.get("adjuntos"):
+                        emails_con_adjuntos.append(email_data)
 
-            logger.info(f"✅ {len(emails_con_adjuntos)} emails con adjuntos válidos")
-            return emails_con_adjuntos
+                logger.info(f"✅ {len(emails_con_adjuntos)} emails con adjuntos válidos")
+                return emails_con_adjuntos
 
-        except Exception as e:
-            logger.error(f"❌ Error al obtener emails: {e}")
-            return []
+            except (socket.timeout, TimeoutError) as e:
+                logger.warning(f"⏱️ Timeout al obtener emails (intento {intento}/{reintentos}): {e}")
+                self.connected = False
+                if intento < reintentos:
+                    wait_time = 2 ** intento
+                    logger.info(f"⏳ Esperando {wait_time}s antes de reintentar...")
+                    time.sleep(wait_time)
+                else:
+                    return []
+
+            except (socket.error, ConnectionError, imaplib.IMAP4.abort) as e:
+                logger.warning(f"🌐 Error de conexión al obtener emails (intento {intento}/{reintentos}): {e}")
+                self.connected = False
+                if intento < reintentos:
+                    wait_time = 2 ** intento
+                    logger.info(f"⏳ Esperando {wait_time}s antes de reintentar...")
+                    time.sleep(wait_time)
+                else:
+                    return []
+
+            except Exception as e:
+                logger.error(f"❌ Error inesperado al obtener emails: {type(e).__name__}: {e}")
+                if intento < reintentos:
+                    wait_time = 2 ** intento
+                    time.sleep(wait_time)
+                else:
+                    return []
+
+        return []
 
     def _procesar_email(self, email_id: bytes) -> Optional[Dict]:
         """

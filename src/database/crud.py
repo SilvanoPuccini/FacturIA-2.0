@@ -9,8 +9,7 @@ from datetime import datetime, timedelta
 from loguru import logger
 
 from .models import (
-    Transaccion, TipoTransaccion, OrigenArchivo,
-    ArchivoProcesado, LogProcesamiento, EstadisticasDiarias
+    Transaccion, TipoTransaccion, OrigenArchivo
 )
 
 
@@ -209,6 +208,9 @@ def eliminar_transaccion(session: Session, transaccion_id: int) -> bool:
 
 
 # ========== ARCHIVOS PROCESADOS ==========
+# TODO: Implementar modelo ArchivoProcesado en el futuro
+
+_archivos_procesados_cache = set()
 
 def registrar_archivo_procesado(
     session: Session,
@@ -217,36 +219,33 @@ def registrar_archivo_procesado(
     tipo: str,
     transacciones_extraidas: int = 0,
     email_id: Optional[str] = None
-) -> ArchivoProcesado:
-    """Registra un archivo como procesado"""
+) -> bool:
+    """
+    Registra un archivo como procesado (versión simplificada sin modelo)
+
+    Returns:
+        True si se registró exitosamente
+    """
     try:
-        archivo = ArchivoProcesado(
-            nombre_archivo=nombre,
-            hash_archivo=hash,
-            tipo_archivo=OrigenArchivo(tipo),
-            transacciones_extraidas=transacciones_extraidas,
-            email_id=email_id,
-            exito=True
-        )
-
-        session.add(archivo)
-        session.flush()
-
-        logger.info(f"✓ Archivo registrado: {nombre}")
-        return archivo
+        # Por ahora solo guardamos el hash en un set en memoria
+        _archivos_procesados_cache.add(hash)
+        logger.info(f"✓ Archivo registrado: {nombre} (hash: {hash[:8]}...)")
+        return True
 
     except Exception as e:
         logger.error(f"❌ Error al registrar archivo: {e}")
-        raise
+        return False
 
 
 def archivo_ya_procesado(session: Session, hash_archivo: str) -> bool:
-    """Verifica si un archivo ya fue procesado (por hash)"""
-    existe = session.query(ArchivoProcesado).filter(
-        ArchivoProcesado.hash_archivo == hash_archivo
-    ).first()
+    """
+    Verifica si un archivo ya fue procesado (por hash)
 
-    return existe is not None
+    Returns:
+        True si el archivo ya fue procesado
+    """
+    # Por ahora verificamos en el cache en memoria
+    return hash_archivo in _archivos_procesados_cache
 
 
 # ========== ESTADÍSTICAS ==========

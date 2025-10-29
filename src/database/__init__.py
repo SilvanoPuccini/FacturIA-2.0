@@ -1,7 +1,7 @@
 """
-Database - Gestión de base de datos con SQLAlchemy
+Database - Gestion de base de datos con SQLAlchemy
 """
-from .models import Transaccion, TipoTransaccion, OrigenArchivo, ArchivoProcesado, LogProcesamiento, EstadisticasDiarias
+from .models import Transaccion, TipoTransaccion, OrigenArchivo
 from .connection import Database, get_database, inicializar_base_datos
 from .crud import (
     crear_transaccion,
@@ -14,8 +14,7 @@ from .crud import (
     archivo_ya_procesado,
     calcular_estadisticas_periodo,
     obtener_totales_mes_actual,
-    obtener_top_categorias,
-    registrar_log
+    obtener_top_categorias
 )
 
 __all__ = [
@@ -23,10 +22,7 @@ __all__ = [
     "Transaccion",
     "TipoTransaccion",
     "OrigenArchivo",
-    "ArchivoProcesado",
-    "LogProcesamiento",
-    "EstadisticasDiarias",
-    # Conexión
+    # Conexion
     "Database",
     "get_database",
     "inicializar_base_datos",
@@ -41,6 +37,5 @@ __all__ = [
     "archivo_ya_procesado",
     "calcular_estadisticas_periodo",
     "obtener_totales_mes_actual",
-    "obtener_top_categorias",
-    "registrar_log"
+    "obtener_top_categorias"
 ]

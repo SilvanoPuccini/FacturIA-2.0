@@ -187,11 +187,10 @@ class Database:
         Returns:
             Diccionario con estadísticas
         """
-        from .models import Transaccion, ArchivoProcesado
+        from .models import Transaccion
 
         with self.get_session() as session:
             total_transacciones = session.query(Transaccion).count()
-            total_archivos = session.query(ArchivoProcesado).count()
 
             # Contar por tipo
             total_ingresos = session.query(Transaccion).filter(
@@ -204,8 +203,7 @@ class Database:
             return {
                 "total_transacciones": total_transacciones,
                 "total_ingresos": total_ingresos,
-                "total_egresos": total_egresos,
-                "total_archivos_procesados": total_archivos
+                "total_egresos": total_egresos
             }
 
     def backup(self, ruta_backup: str):

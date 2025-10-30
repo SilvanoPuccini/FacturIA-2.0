@@ -709,8 +709,10 @@ def tabla_transacciones_completa(session, filtros: Dict):
                 mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
                 use_container_width=True
             )
+        except ImportError as e:
+            st.error(f"⚠️ Falta instalar: `pip install openpyxl xlsxwriter`")
         except Exception as e:
-            st.button("📊 Excel (instalar openpyxl)", disabled=True, use_container_width=True)
+            st.error(f"❌ Error Excel: {str(e)}")
 
     with col_exp3:
         # PDF (con estadísticas)
@@ -736,10 +738,12 @@ def tabla_transacciones_completa(session, filtros: Dict):
                     use_container_width=True
                 )
             else:
-                st.button("📕 PDF (instalar reportlab)", disabled=True, use_container_width=True)
+                st.error("⚠️ No se pudo generar PDF")
 
+        except ImportError as e:
+            st.error(f"⚠️ Falta instalar: `pip install reportlab`")
         except Exception as e:
-            st.button("📕 PDF (instalar reportlab)", disabled=True, use_container_width=True)
+            st.error(f"❌ Error PDF: {str(e)}")
 
 
 # ==================== SIDEBAR Y FILTROS ====================

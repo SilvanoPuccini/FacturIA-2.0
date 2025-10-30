@@ -35,7 +35,7 @@ class GeminiClassifier:
         self.timeout = timeout
         self.max_reintentos = max_reintentos
         self._circuit_breaker_failures = 0
-        self._circuit_breaker_threshold = 5
+        self._circuit_breaker_threshold = 10  # Aumentado de 5 a 10 para más tolerancia
         self._circuit_breaker_reset_time = None
 
         # Configurar Gemini
@@ -78,7 +78,7 @@ class GeminiClassifier:
 
         # Si alcanzamos el umbral, abrir el circuit breaker
         if self._circuit_breaker_failures >= self._circuit_breaker_threshold:
-            self._circuit_breaker_reset_time = time.time() + 60  # Esperar 60 segundos
+            self._circuit_breaker_reset_time = time.time() + 120  # Esperar 120 segundos
             logger.error(f"⚡ Circuit breaker ABIERTO por {self._circuit_breaker_failures} fallos consecutivos")
             return False
 
@@ -130,7 +130,7 @@ class GeminiClassifier:
                     logger.warning(f"⏱️ Rate limit alcanzado (intento {intento}/{self.max_reintentos})")
                     self._registrar_fallo_api()
                     if intento < self.max_reintentos:
-                        wait_time = min(2 ** intento, 30)  # Backoff exponencial, máx 30s
+                        wait_time = min(10 * intento, 60)  # 10s, 20s, 30s... máx 60s
                         logger.info(f"⏳ Esperando {wait_time}s por rate limit...")
                         time.sleep(wait_time)
                         continue

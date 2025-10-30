@@ -408,7 +408,7 @@ else:
                         guardar = st.form_submit_button("✅ Guardar Cambios", use_container_width=True)
 
                     with col_btn2:
-                        eliminar = st.form_submit_button("🗑️ Eliminar Transacción", use_container_width=True, type="secondary")
+                        eliminar = st.form_submit_button("⚠️ Eliminar Permanentemente", use_container_width=True, type="secondary")
 
                     if guardar:
                         try:
@@ -435,15 +435,12 @@ else:
                             st.error(f"❌ Error al actualizar transacción: {e}")
 
                     if eliminar:
-                        confirmar = st.warning("⚠️ ¿Estás seguro de eliminar esta transacción? Esta acción no se puede deshacer.")
-
-                        if st.button("⚠️ Sí, eliminar permanentemente"):
-                            try:
-                                eliminar_transaccion(session, transaccion_id_editar)
-                                st.success(f"🗑️ Transacción #{transaccion_id_editar} eliminada exitosamente!")
-                                st.rerun()
-                            except Exception as e:
-                                st.error(f"❌ Error al eliminar transacción: {e}")
+                        try:
+                            eliminar_transaccion(session, transaccion_id_editar)
+                            st.success(f"🗑️ Transacción #{transaccion_id_editar} eliminada exitosamente!")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"❌ Error al eliminar transacción: {e}")
 
             else:
                 st.warning(f"⚠️ No se encontró transacción con ID #{transaccion_id_editar}")

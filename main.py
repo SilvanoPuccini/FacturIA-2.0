@@ -52,6 +52,38 @@ logger.add("logs/facturia2_{time:YYYY-MM-DD}.log", rotation="500 MB", retention=
 BASE_DIR = Path(__file__).parent
 
 
+def extraer_persona_desde_email(email_from: str, email_subject: str = "") -> str:
+    """
+    Extrae el nombre de la persona desde el email remitente
+
+    Args:
+        email_from: Email del remitente (ej: "silva.puccini@gmail.com")
+        email_subject: Asunto del email (opcional, para contexto adicional)
+
+    Returns:
+        Nombre de la persona formateado (ej: "Silva Puccini")
+    """
+    if not email_from:
+        return "General"
+
+    # Extraer parte antes del @
+    usuario = email_from.split('@')[0] if '@' in email_from else email_from
+
+    # Reemplazar puntos, guiones y underscores por espacios
+    usuario = usuario.replace('.', ' ').replace('_', ' ').replace('-', ' ')
+
+    # Capitalizar cada palabra
+    nombre = ' '.join(word.capitalize() for word in usuario.split())
+
+    # Si el nombre es muy genérico, intentar mejorar con el dominio
+    genericos = ['info', 'noreply', 'no-reply', 'admin', 'contacto', 'support']
+    if usuario.lower() in genericos and '@' in email_from:
+        dominio = email_from.split('@')[1].split('.')[0]
+        nombre = dominio.capitalize()
+
+    return nombre
+
+
 class FacturiaOrchestrator:
     """Orquestador principal del sistema FacturIA 2.0"""
 
@@ -267,9 +299,15 @@ class FacturiaOrchestrator:
                     logger.warning(f"⚠️  No se pudo clasificar: {archivo_info['nombre_guardado']}")
                     continue
 
+                # Detectar persona automáticamente desde email remitente
+                email_from = archivo_info.get('email_from')
+                email_subject = archivo_info.get('email_subject', '')
+                persona_detectada = extraer_persona_desde_email(email_from, email_subject) if email_from else "General"
+
                 # Crear transacción
                 transaccion = {
                     **clasificacion,
+                    "persona": persona_detectada,  # Sobrescribir persona con la detectada del email
                     "origen": archivo_info['tipo'],
                     "archivo_origen": archivo_info['nombre_original'],
                     "ruta_archivo": ruta,
@@ -278,6 +316,8 @@ class FacturiaOrchestrator:
                     "email_from": archivo_info.get('email_from'),
                     "procesado_por_ia": True
                 }
+
+                logger.info(f"👤 Persona detectada: {persona_detectada} (desde: {email_from})")
 
                 transacciones.append(transaccion)
 
@@ -333,8 +373,16 @@ class FacturiaOrchestrator:
                 # Transformar y categorizar
                 transacciones = self.transformer.transformar_batch(transacciones)
 
+                # Detectar persona desde email
+                email_from = archivo_info.get('email_from')
+                email_subject = archivo_info.get('email_subject', '')
+                persona_detectada = extraer_persona_desde_email(email_from, email_subject) if email_from else "General"
+
+                logger.info(f"👤 Persona detectada: {persona_detectada} (desde: {email_from})")
+
                 # Agregar metadata
                 for t in transacciones:
+                    t['persona'] = persona_detectada  # Agregar persona detectada
                     t['archivo_origen'] = archivo_info['nombre_original']
                     t['ruta_archivo'] = ruta
                     t['email_id'] = archivo_info.get('email_id')

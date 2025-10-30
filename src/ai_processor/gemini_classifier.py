@@ -171,13 +171,14 @@ class GeminiClassifier:
 
         return None
 
-    def clasificar_imagen(self, imagen: Image.Image, contexto: str = "") -> Optional[Dict]:
+    def clasificar_imagen(self, imagen: Image.Image, contexto: str = "", categorias_validas: Optional[Dict] = None) -> Optional[Dict]:
         """
         Clasifica una imagen de documento financiero
 
         Args:
             imagen: Imagen PIL del documento
             contexto: Contexto adicional (ej: nombre del archivo, remitente)
+            categorias_validas: Dict con categorías válidas {'ingresos': [...], 'egresos': [...]}
 
         Returns:
             Diccionario con datos extraídos o None si falla
@@ -201,12 +202,25 @@ class GeminiClassifier:
             # Parsear JSON
             datos_extraidos = self._parsear_respuesta(texto_respuesta)
 
-            if datos_extraidos:
-                logger.info(f"✅ Documento clasificado: {datos_extraidos.get('tipo')} - {datos_extraidos.get('categoria')}")
-                return datos_extraidos
-            else:
+            if not datos_extraidos:
                 logger.warning("⚠️  No se pudo extraer datos válidos de la respuesta")
                 return None
+
+            # Validar y corregir si se proporcionaron categorías válidas
+            if categorias_validas:
+                datos_extraidos = self._validar_y_corregir_datos(datos_extraidos, categorias_validas)
+
+                if not datos_extraidos:
+                    logger.warning("⚠️ Datos inválidos después de validación")
+                    return None
+
+            logger.info(f"✅ Documento clasificado: {datos_extraidos.get('tipo')} - {datos_extraidos.get('categoria')} - ${datos_extraidos.get('monto')}")
+
+            # Marcar si requiere revisión manual (baja confianza)
+            if datos_extraidos.get('requiere_revision'):
+                logger.warning(f"⚠️ Transacción marcada para revisión manual: {datos_extraidos.get('razon_revision')}")
+
+            return datos_extraidos
 
         except json.JSONDecodeError as e:
             logger.error(f"❌ Error al parsear JSON de Gemini: {e}")
@@ -221,7 +235,8 @@ class GeminiClassifier:
         self,
         imagenes: List[Image.Image],
         texto_extraido: str = "",
-        contexto: str = ""
+        contexto: str = "",
+        categorias_validas: Optional[Dict] = None
     ) -> Optional[Dict]:
         """
         Clasifica un documento que puede tener múltiples páginas
@@ -230,6 +245,7 @@ class GeminiClassifier:
             imagenes: Lista de imágenes del documento
             texto_extraido: Texto extraído del PDF (si aplica)
             contexto: Contexto adicional
+            categorias_validas: Dict con categorías válidas {'ingresos': [...], 'egresos': [...]}
 
         Returns:
             Diccionario con datos extraídos
@@ -246,7 +262,7 @@ class GeminiClassifier:
         if texto_extraido:
             contexto = f"{contexto}\nTexto extraído del PDF:\n{texto_extraido[:500]}"
 
-        return self.clasificar_imagen(primera_pagina, contexto)
+        return self.clasificar_imagen(primera_pagina, contexto, categorias_validas)
 
     def _parsear_respuesta(self, texto_respuesta: str) -> Optional[Dict]:
         """
@@ -298,9 +314,181 @@ class GeminiClassifier:
             logger.error(f"Error al parsear respuesta: {e}")
             return None
 
+    def _validar_y_corregir_datos(self, datos: Dict, categorias_validas: Dict) -> Optional[Dict]:
+        """
+        Valida y corrige automáticamente los datos extraídos
+
+        Args:
+            datos: Datos extraídos por Gemini
+            categorias_validas: Dict con categorías válidas {'ingresos': [...], 'egresos': [...]}
+
+        Returns:
+            Datos corregidos o None si no se pueden corregir
+        """
+        try:
+            datos_corregidos = datos.copy()
+            requiere_revision = False
+            razones_revision = []
+
+            # Validar tipo
+            tipo = datos_corregidos.get("tipo", "").lower().strip()
+            if tipo not in ["ingreso", "egreso"]:
+                logger.error(f"❌ Tipo inválido: '{tipo}'")
+                return None
+
+            datos_corregidos["tipo"] = tipo
+
+            # Obtener categorías válidas según el tipo
+            if tipo == "ingreso":
+                categorias = categorias_validas.get("ingresos", [])
+            else:
+                categorias = categorias_validas.get("egresos", [])
+
+            # Validar y corregir categoría
+            categoria_original = datos_corregidos.get("categoria", "").lower().strip()
+            categoria_corregida = self._corregir_categoria(categoria_original, categorias)
+
+            if not categoria_corregida:
+                logger.error(f"❌ No se pudo corregir categoría: '{categoria_original}'")
+                requiere_revision = True
+                razones_revision.append(f"Categoría desconocida: {categoria_original}")
+                # Usar categoría por defecto
+                categoria_corregida = "otro_egreso" if tipo == "egreso" else "otro_ingreso"
+
+            if categoria_corregida != categoria_original:
+                logger.warning(f"🔧 Categoría corregida: '{categoria_original}' → '{categoria_corregida}'")
+
+            datos_corregidos["categoria"] = categoria_corregida
+
+            # Validar y corregir monto
+            monto = datos_corregidos.get("monto")
+            if monto is None:
+                logger.error("❌ Monto es null")
+                return None
+
+            # Convertir string a número si es necesario
+            if isinstance(monto, str):
+                # Remover símbolos de moneda y espacios
+                monto_limpio = monto.replace("$", "").replace("AR$", "").replace(" ", "").replace(".", "").replace(",", ".")
+                try:
+                    monto = float(monto_limpio)
+                    logger.info(f"🔧 Monto convertido de string: '{datos_corregidos.get('monto')}' → {monto}")
+                except ValueError:
+                    logger.error(f"❌ No se puede convertir monto: '{datos_corregidos.get('monto')}'")
+                    return None
+
+            if not isinstance(monto, (int, float)) or monto <= 0:
+                logger.error(f"❌ Monto inválido: {monto}")
+                return None
+
+            datos_corregidos["monto"] = float(monto)
+
+            # Validar fecha
+            fecha = datos_corregidos.get("fecha")
+            if fecha:
+                # Validar formato YYYY-MM-DD
+                import re
+                if not re.match(r'^\d{4}-\d{2}-\d{2}$', str(fecha)):
+                    logger.warning(f"⚠️ Formato de fecha inválido: {fecha}")
+                    requiere_revision = True
+                    razones_revision.append(f"Fecha con formato incorrecto: {fecha}")
+
+            # Marcar para revisión si es necesario
+            datos_corregidos["requiere_revision"] = requiere_revision
+            datos_corregidos["razon_revision"] = ", ".join(razones_revision) if razones_revision else None
+            datos_corregidos["procesado_por_ia"] = True
+            datos_corregidos["confianza_clasificacion"] = 0.5 if requiere_revision else 0.9
+
+            return datos_corregidos
+
+        except Exception as e:
+            logger.error(f"❌ Error al validar y corregir datos: {e}")
+            return None
+
+    def _corregir_categoria(self, categoria: str, categorias_validas: List[str]) -> Optional[str]:
+        """
+        Intenta corregir una categoría usando similitud de texto
+
+        Args:
+            categoria: Categoría a corregir
+            categorias_validas: Lista de categorías válidas
+
+        Returns:
+            Categoría corregida o None si no se puede corregir
+        """
+        if not categoria:
+            return None
+
+        categoria_lower = categoria.lower().strip()
+
+        # Primero, verificar coincidencia exacta
+        if categoria_lower in categorias_validas:
+            return categoria_lower
+
+        # Mapeo de sinónimos y variaciones comunes
+        mapeo_sinonimos = {
+            # Servicios
+            "servicios": "factura_servicios",
+            "factura servicios": "factura_servicios",
+            "facturas": "factura_servicios",
+            "luz": "factura_servicios",
+            "agua": "factura_servicios",
+            "gas": "factura_servicios",
+            "internet": "factura_servicios",
+            "telefono": "factura_servicios",
+            "celular": "factura_servicios",
+
+            # Supermercado
+            "super": "supermercado",
+            "compras": "supermercado",
+            "alimentos": "supermercado",
+            "mercado": "supermercado",
+
+            # Impuestos
+            "impuesto": "impuestos",
+            "abl": "impuestos",
+            "patente": "impuestos",
+            "ganancias": "impuestos",
+
+            # Salud
+            "medico": "salud",
+            "farmacia": "salud",
+            "medicina": "salud",
+            "prepaga": "salud",
+            "obra social": "salud",
+
+            # Entretenimiento
+            "cine": "entretenimiento",
+            "restaurante": "entretenimiento",
+            "delivery": "entretenimiento",
+            "ocio": "entretenimiento",
+
+            # Ingresos
+            "salario": "sueldo",
+            "pago": "sueldo",
+            "honorarios": "cobro_servicios",
+            "factura": "cobro_servicios",
+            "transferencia": "transferencia_recibida",
+            "venta": "ventas",
+        }
+
+        # Intentar mapeo directo
+        if categoria_lower in mapeo_sinonimos:
+            categoria_mapeada = mapeo_sinonimos[categoria_lower]
+            if categoria_mapeada in categorias_validas:
+                return categoria_mapeada
+
+        # Búsqueda por substring (ej: "factura_de_servicios" → "factura_servicios")
+        for valida in categorias_validas:
+            if valida in categoria_lower or categoria_lower in valida:
+                return valida
+
+        # Si no hay coincidencia, devolver None
+        return None
+
     def validar_clasificacion(self, datos: Dict, categorias_validas: Dict) -> bool:
         """
-        Valida que la clasificación sea correcta
+        Valida que la clasificación sea correcta (versión legacy)
 
         Args:
             datos: Datos extraídos por Gemini

@@ -42,6 +42,7 @@ from src.database import (
     registrar_archivo_procesado,
     archivo_ya_procesado
 )
+from src.notifications import crear_notifier_desde_env
 
 # Configurar logger
 logger.remove()
@@ -80,6 +81,17 @@ class FacturiaOrchestrator:
 
         # Inicializar base de datos
         self.db = inicializar_base_datos()
+
+        # Sistema de notificaciones
+        try:
+            self.notifier = crear_notifier_desde_env()
+            if self.notifier.habilitado:
+                logger.info("✅ Sistema de notificaciones por email habilitado")
+            else:
+                logger.info("ℹ️  Sistema de notificaciones por email deshabilitado (opcional)")
+        except Exception as e:
+            logger.warning(f"⚠️  No se pudo inicializar notificaciones: {e}")
+            self.notifier = None
 
         logger.info("✅ FacturIA 2.0 inicializado correctamente")
 
@@ -236,10 +248,19 @@ class FacturiaOrchestrator:
                 # Clasificar con IA
                 contexto = f"Archivo: {archivo_info['nombre_original']}, Email: {archivo_info.get('email_subject', '')}"
 
+                # Preparar categorías válidas para validación
+                from src.config import CATEGORIAS_INGRESOS, CATEGORIAS_EGRESOS
+                categorias_validas = {
+                    'ingresos': CATEGORIAS_INGRESOS,
+                    'egresos': CATEGORIAS_EGRESOS
+                }
+
+                # Pasar categorías válidas para validación automática
                 clasificacion = self.classifier.clasificar_documento(
                     doc['imagenes'],
                     doc['texto_extraido'],
-                    contexto
+                    contexto,
+                    categorias_validas=categorias_validas
                 )
 
                 if not clasificacion:
@@ -347,8 +368,37 @@ class FacturiaOrchestrator:
                 cantidad = crear_transacciones_batch(session, transacciones)
                 logger.info(f"💾 {cantidad} transacciones guardadas en BD")
 
+                # Enviar notificación por email si está habilitado
+                if self.notifier and self.notifier.habilitado and cantidad > 0:
+                    try:
+                        # Obtener nombres de archivos procesados
+                        archivos_procesados = [t.get('archivo_origen', 'N/A') for t in transacciones[:10]]
+
+                        # Enviar notificación
+                        self.notifier.enviar_notificacion_procesamiento(
+                            transacciones=transacciones,
+                            exitosas=cantidad,
+                            fallidas=len(transacciones) - cantidad,
+                            archivos_procesados=archivos_procesados
+                        )
+
+                        logger.info(f"📧 Notificación enviada por email")
+
+                    except Exception as e:
+                        logger.warning(f"⚠️  Error al enviar notificación: {e}")
+
         except Exception as e:
             logger.error(f"❌ Error al guardar transacciones: {e}")
+
+            # Enviar alerta de error si está habilitado
+            if self.notifier and self.notifier.habilitado:
+                try:
+                    self.notifier.enviar_alerta_error(
+                        error_msg="Error al guardar transacciones en BD",
+                        detalle=str(e)
+                    )
+                except:
+                    pass  # Ignorar si falla el envío de la alerta
 
     def procesar_archivos_pendientes(self):
         """Procesa archivos que quedaron pendientes en ciclos anteriores"""

@@ -681,14 +681,65 @@ def tabla_transacciones_completa(session, filtros: Dict):
         }
     )
 
-    # Opción de descarga
-    csv = df.to_csv(index=False).encode('utf-8')
-    st.download_button(
-        label="📥 Descargar CSV",
-        data=csv,
-        file_name=f'transacciones_{datetime.now().strftime("%Y%m%d_%H%M%S")}.csv',
-        mime='text/csv',
-    )
+    # Opciones de exportación
+    st.markdown("### 📥 Exportar Datos")
+
+    col_exp1, col_exp2, col_exp3 = st.columns(3)
+
+    with col_exp1:
+        # CSV (básico)
+        csv = df.to_csv(index=False).encode('utf-8')
+        st.download_button(
+            label="📄 Descargar CSV",
+            data=csv,
+            file_name=f'transacciones_{datetime.now().strftime("%Y%m%d_%H%M%S")}.csv',
+            mime='text/csv',
+            use_container_width=True
+        )
+
+    with col_exp2:
+        # Excel (con formato)
+        try:
+            from src.dashboard.export_utils import exportar_a_excel
+            excel_buffer = exportar_a_excel(transacciones)
+            st.download_button(
+                label="📊 Descargar Excel",
+                data=excel_buffer,
+                file_name=f'transacciones_{datetime.now().strftime("%Y%m%d_%H%M%S")}.xlsx',
+                mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                use_container_width=True
+            )
+        except Exception as e:
+            st.button("📊 Excel (instalar openpyxl)", disabled=True, use_container_width=True)
+
+    with col_exp3:
+        # PDF (con estadísticas)
+        try:
+            from src.dashboard.export_utils import exportar_a_pdf
+
+            # Calcular estadísticas para el PDF
+            stats_pdf = {
+                'total_transacciones': len(transacciones),
+                'total_ingresos': sum(t.monto for t in transacciones if hasattr(t, 'tipo') and t.tipo.value == 'ingreso'),
+                'total_egresos': sum(t.monto for t in transacciones if hasattr(t, 'tipo') and t.tipo.value == 'egreso'),
+                'balance': sum(t.monto if hasattr(t, 'tipo') and t.tipo.value == 'ingreso' else -t.monto for t in transacciones)
+            }
+
+            pdf_buffer = exportar_a_pdf(transacciones, stats_pdf)
+
+            if pdf_buffer:
+                st.download_button(
+                    label="📕 Descargar PDF",
+                    data=pdf_buffer,
+                    file_name=f'transacciones_{datetime.now().strftime("%Y%m%d_%H%M%S")}.pdf',
+                    mime='application/pdf',
+                    use_container_width=True
+                )
+            else:
+                st.button("📕 PDF (instalar reportlab)", disabled=True, use_container_width=True)
+
+        except Exception as e:
+            st.button("📕 PDF (instalar reportlab)", disabled=True, use_container_width=True)
 
 
 # ==================== SIDEBAR Y FILTROS ====================

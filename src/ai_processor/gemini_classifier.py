@@ -324,7 +324,8 @@ class GeminiClassifier:
 
         except json.JSONDecodeError as e:
             logger.error(f"Error al decodificar JSON: {e}")
-            logger.debug(f"Texto que falló: {texto_limpio}")
+            logger.error(f"TEXTO ORIGINAL:\n{'='*60}\n{texto_respuesta}\n{'='*60}")
+            logger.error(f"TEXTO LIMPIO:\n{'='*60}\n{texto_limpio}\n{'='*60}")
             return None
 
         except Exception as e:

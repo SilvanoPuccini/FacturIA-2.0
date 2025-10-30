@@ -7,6 +7,7 @@ import pandas as pd
 from datetime import datetime, date
 from pathlib import Path
 import sys
+import time
 
 BASE_DIR = Path(__file__).parent.parent.parent.parent
 sys.path.insert(0, str(BASE_DIR))
@@ -427,19 +428,26 @@ else:
                             }
 
                             actualizar_transaccion(session, transaccion_id_editar, datos_actualizados)
+                            session.commit()  # Commit explícito antes de rerun
 
                             st.success(f"✅ Transacción #{transaccion_id_editar} actualizada exitosamente!")
+                            time.sleep(1)  # Pequeña pausa para mostrar el mensaje
                             st.rerun()
 
                         except Exception as e:
+                            session.rollback()  # Rollback en caso de error
                             st.error(f"❌ Error al actualizar transacción: {e}")
 
                     if eliminar:
                         try:
                             eliminar_transaccion(session, transaccion_id_editar)
+                            session.commit()  # Commit explícito antes de rerun
+
                             st.success(f"🗑️ Transacción #{transaccion_id_editar} eliminada exitosamente!")
+                            time.sleep(1)  # Pequeña pausa para mostrar el mensaje
                             st.rerun()
                         except Exception as e:
+                            session.rollback()  # Rollback en caso de error
                             st.error(f"❌ Error al eliminar transacción: {e}")
 
             else:

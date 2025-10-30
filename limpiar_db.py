@@ -12,7 +12,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
 from src.database import Database
-from src.database.models import Transaccion, ArchivoProcesado
+from src.database.models import Transaccion
 
 def limpiar_base_datos():
     """Limpia todas las tablas de la base de datos"""
@@ -21,7 +21,7 @@ def limpiar_base_datos():
     print("⚠️  LIMPIAR BASE DE DATOS - FacturIA 2.0")
     print("="*60)
     print("\n⚠️  ADVERTENCIA: Esta acción eliminará TODAS las transacciones")
-    print("y archivos procesados de la base de datos.")
+    print("de la base de datos.")
     print("\nEsta acción NO se puede deshacer.\n")
 
     confirmacion = input("¿Estás seguro de continuar? Escribe 'SI' para confirmar: ")
@@ -37,13 +37,11 @@ def limpiar_base_datos():
         with db.get_session() as session:
             # Contar antes de eliminar
             total_transacciones = session.query(Transaccion).count()
-            total_archivos = session.query(ArchivoProcesado).count()
 
             print(f"\n📊 Registros a eliminar:")
             print(f"  - Transacciones: {total_transacciones}")
-            print(f"  - Archivos procesados: {total_archivos}")
 
-            if total_transacciones == 0 and total_archivos == 0:
+            if total_transacciones == 0:
                 print("\n✅ La base de datos ya está vacía.")
                 return
 
@@ -53,17 +51,11 @@ def limpiar_base_datos():
             session.query(Transaccion).delete()
             print(f"  ✓ {total_transacciones} transacciones eliminadas")
 
-            # Eliminar todos los archivos procesados
-            session.query(ArchivoProcesado).delete()
-            print(f"  ✓ {total_archivos} archivos procesados eliminados")
-
             session.commit()
 
             print("\n✅ Base de datos limpiada exitosamente!")
             print("\n📝 Nota: Los archivos físicos en data/ NO fueron eliminados.")
-            print("Si también quieres limpiar archivos, ejecuta:")
-            print("  rm -rf data/procesado/*/*")
-            print("  rm -rf data/temp_*/*")
+            print("Si también quieres limpiar archivos físicos, usa la Opción 2")
 
     except Exception as e:
         print(f"\n❌ Error al limpiar base de datos: {e}")
@@ -95,14 +87,11 @@ def limpiar_todo():
     try:
         with db.get_session() as session:
             total_transacciones = session.query(Transaccion).count()
-            total_archivos = session.query(ArchivoProcesado).count()
 
             print(f"\n📊 Eliminando de base de datos:")
             print(f"  - Transacciones: {total_transacciones}")
-            print(f"  - Archivos procesados: {total_archivos}")
 
             session.query(Transaccion).delete()
-            session.query(ArchivoProcesado).delete()
             session.commit()
 
             print("  ✓ Base de datos limpiada")

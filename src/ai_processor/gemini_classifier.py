@@ -50,7 +50,7 @@ class GeminiClassifier:
             }
 
             self.model = genai.GenerativeModel(
-                'gemini-1.5-pro',
+                'gemini-2.0-flash-exp',  # Gemini 2.0: 15 RPM (1 cada 4s)
                 generation_config=generation_config
             )
             logger.info("✅ Gemini Vision configurado correctamente")
@@ -288,8 +288,30 @@ class GeminiClassifier:
 
             texto_limpio = texto_limpio.strip()
 
-            # Parsear JSON
-            datos = json.loads(texto_limpio)
+            # FIX: Gemini 2.0 devuelve llaves dobles {{ }} que son inválidas en JSON
+            # Reemplazar por llaves simples
+            if texto_limpio.startswith("{{") and texto_limpio.endswith("}}"):
+                texto_limpio = "{" + texto_limpio[2:-2] + "}"
+
+            # Estrategia 1: Intentar parsear JSON normal
+            try:
+                datos = json.loads(texto_limpio)
+            except json.JSONDecodeError:
+                # Estrategia 2: Reemplazar comillas simples por dobles
+                # Pero con cuidado para no romper strings que contengan apóstrofes
+                import re
+                # Buscar el patrón de JSON con comillas simples
+                texto_corregido = texto_limpio.replace("'", '"')
+                try:
+                    datos = json.loads(texto_corregido)
+                except json.JSONDecodeError:
+                    # Estrategia 3: Intentar extraer con regex (último recurso)
+                    logger.warning("Usando extracción por regex como último recurso")
+                    import ast
+                    try:
+                        datos = ast.literal_eval(texto_limpio)
+                    except:
+                        raise json.JSONDecodeError("No se pudo parsear con ninguna estrategia", texto_limpio, 0)
 
             # Validar campos obligatorios
             campos_requeridos = ["tipo", "categoria", "monto"]
@@ -307,7 +329,8 @@ class GeminiClassifier:
 
         except json.JSONDecodeError as e:
             logger.error(f"Error al decodificar JSON: {e}")
-            logger.debug(f"Texto que falló: {texto_limpio}")
+            logger.error(f"TEXTO ORIGINAL:\n{'='*60}\n{texto_respuesta}\n{'='*60}")
+            logger.error(f"TEXTO LIMPIO:\n{'='*60}\n{texto_limpio}\n{'='*60}")
             return None
 
         except Exception as e:

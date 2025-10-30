@@ -1,4 +1,5 @@
+# -*- coding: utf-8 -*-
 """
-Dashboard - Interfaz web con Streamlit para visualización de datos
+Dashboard - Interfaz web con Streamlit para visualizaciÃ³n de datos
 """
-# No es necesario exportar nada aquí, el dashboard se ejecuta con streamlit run
+# No es necesario exportar nada aquÃ­, el dashboard se ejecuta con streamlit run

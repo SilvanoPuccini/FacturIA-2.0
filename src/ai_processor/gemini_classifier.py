@@ -288,6 +288,11 @@ class GeminiClassifier:
 
             texto_limpio = texto_limpio.strip()
 
+            # FIX: Gemini 2.0 devuelve llaves dobles {{ }} que son inválidas en JSON
+            # Reemplazar por llaves simples
+            if texto_limpio.startswith("{{") and texto_limpio.endswith("}}"):
+                texto_limpio = "{" + texto_limpio[2:-2] + "}"
+
             # Estrategia 1: Intentar parsear JSON normal
             try:
                 datos = json.loads(texto_limpio)

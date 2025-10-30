@@ -240,7 +240,8 @@ class GmailReader:
 
             # Extraer información básica
             subject = self._decode_subject(msg.get("Subject", "Sin asunto"))
-            from_ = msg.get("From", "Desconocido")
+            from_raw = msg.get("From", "Desconocido")
+            from_ = self._extraer_email_puro(from_raw)  # Extraer solo el email limpio
             date_str = msg.get("Date", "")
 
             # Procesar adjuntos
@@ -292,8 +293,33 @@ class GmailReader:
                     decoded_subject += part
 
             return decoded_subject
-        except:
+        except Exception as e:
+            logger.warning(f"Error al decodificar asunto: {e}")
             return subject
+
+    def _extraer_email_puro(self, from_field: str) -> str:
+        """
+        Extrae solo el email desde el campo From
+
+        Ejemplos:
+            "Silvano Puccini <silva_puccini@hotmail.com>" -> "silva_puccini@hotmail.com"
+            "silva.jm.puccini@gmail.com" -> "silva.jm.puccini@gmail.com"
+        """
+        import re
+
+        # Buscar email entre < >
+        match = re.search(r'<([^>]+)>', from_field)
+        if match:
+            return match.group(1).strip()
+
+        # Si no hay < >, asumir que todo el campo es el email
+        # Extraer usando regex simple de email
+        email_match = re.search(r'[\w\.-]+@[\w\.-]+\.\w+', from_field)
+        if email_match:
+            return email_match.group(0).strip()
+
+        # Si no se puede extraer, devolver el campo completo limpio
+        return from_field.strip()
 
     def _extraer_adjuntos_parte(self, part) -> List[Dict]:
         """

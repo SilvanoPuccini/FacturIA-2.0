@@ -28,20 +28,30 @@ def exportar_a_excel(transacciones: List, nombre_archivo: str = None) -> BytesIO
         # Fallback: exportar como CSV sin formato
         return exportar_a_csv(transacciones)
 
+    # Helper para limpiar strings con encoding
+    def safe_str(value):
+        """Convierte valor a string seguro manejando encoding"""
+        if value is None:
+            return ""
+        try:
+            return str(value)
+        except:
+            return ""
+
     # Crear DataFrame
     data = []
     for t in transacciones:
         data.append({
             "ID": t.id,
             "Fecha": t.fecha_transaccion.strftime('%Y-%m-%d') if t.fecha_transaccion else "",
-            "Tipo": t.tipo.value.upper() if t.tipo else "",
-            "Categoría": t.categoria or "",
+            "Tipo": safe_str(t.tipo.value.upper() if t.tipo else ""),
+            "Categoría": safe_str(t.categoria or ""),
             "Monto": float(t.monto) if t.monto else 0,
-            "Persona": t.persona or "General",
-            "Emisor/Receptor": t.emisor_receptor or "",
-            "Descripción": t.descripcion or "",
-            "Número Comprobante": t.numero_comprobante or "",
-            "Origen": t.origen.value.upper() if hasattr(t, 'origen') and t.origen else "",
+            "Persona": safe_str(t.persona or "General"),
+            "Emisor/Receptor": safe_str(t.emisor_receptor or ""),
+            "Descripción": safe_str(t.descripcion or ""),
+            "Número Comprobante": safe_str(t.numero_comprobante or ""),
+            "Origen": safe_str(t.origen.value.upper() if hasattr(t, 'origen') and t.origen else ""),
             "Procesado por IA": "Sí" if t.procesado_por_ia else "No",
             "Requiere Revisión": "Sí" if t.requiere_revision else "No",
             "Editado Manualmente": "Sí" if t.editado_manualmente else "No"
@@ -244,17 +254,30 @@ def exportar_a_pdf(transacciones: List, stats: Dict = None) -> BytesIO:
     elements.append(Paragraph("Detalle de Transacciones", styles['Heading2']))
     elements.append(Spacer(1, 0.2*inch))
 
+    # Helper para strings seguros
+    def safe_str(value):
+        """Convierte valor a string seguro manejando encoding"""
+        if value is None:
+            return ""
+        try:
+            return str(value)
+        except:
+            return ""
+
     # Preparar datos
     table_data = [["ID", "Fecha", "Tipo", "Categoría", "Monto", "Persona"]]
 
     for t in transacciones[:100]:  # Limitar a 100 para no hacer el PDF muy grande
+        categoria_safe = safe_str(t.categoria)[:15] if t.categoria else ""
+        persona_safe = safe_str(t.persona)[:12] if t.persona else "General"
+
         table_data.append([
             str(t.id),
             t.fecha_transaccion.strftime('%Y-%m-%d') if t.fecha_transaccion else "",
-            t.tipo.value.upper() if t.tipo else "",
-            t.categoria[:15] if t.categoria else "",
+            safe_str(t.tipo.value.upper() if t.tipo else ""),
+            categoria_safe,
             f"${t.monto:,.2f}",
-            t.persona[:12] if t.persona else "General"
+            persona_safe
         ])
 
     # Crear tabla

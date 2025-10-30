@@ -53,43 +53,99 @@ CATEGORIAS_EGRESOS = [
 
 # === PROMPT PARA GEMINI ===
 GEMINI_PROMPT_TEMPLATE = """
-Analiza esta imagen/documento financiero y extrae TODOS los datos en formato JSON.
+Eres un experto en análisis de documentos financieros. Tu tarea es extraer TODOS los datos relevantes de esta imagen/documento y responder en formato JSON estructurado.
 
-Responde EXACTAMENTE en este formato JSON (sin texto adicional):
+⚠️ INSTRUCCIONES CRÍTICAS:
+1. Responde SOLO con el objeto JSON, sin texto adicional antes o después
+2. NO uses bloques de código markdown (```json)
+3. Usa EXACTAMENTE las categorías listadas abajo (sin variaciones ni sinónimos)
+4. Si tienes dudas entre dos categorías, elige la más específica
+
+📋 FORMATO DE RESPUESTA REQUERIDO:
 
 {{
   "tipo": "ingreso" o "egreso",
-  "categoria": "una de las categorías listadas abajo",
+  "categoria": "exactamente una de las categorías válidas listadas abajo",
   "fecha": "YYYY-MM-DD",
   "monto": 1500.50,
-  "emisor_receptor": "Nombre de la empresa o persona",
-  "descripcion": "Breve descripción del concepto",
-  "numero_comprobante": "001-00123456 (si existe)"
+  "emisor_receptor": "Nombre exacto de la empresa o persona",
+  "descripcion": "Descripción clara y concisa del concepto",
+  "numero_comprobante": "001-00123456",
+  "persona": "Nombre de la persona asociada (si está visible)"
 }}
 
-CATEGORÍAS DE INGRESOS VÁLIDAS:
-- sueldo
-- cobro_servicios
-- deposito
-- transferencia_recibida
-- ventas
-- otro_ingreso
+✅ CATEGORÍAS DE INGRESOS VÁLIDAS (elige UNA exactamente como está escrita):
+- sueldo → Pago de empleador, salario mensual, aguinaldo
+- cobro_servicios → Pago por servicios profesionales prestados
+- deposito → Depósito bancario, transferencia entrante
+- transferencia_recibida → Transferencia de terceros
+- ventas → Ingresos por venta de productos
+- otro_ingreso → Cualquier otro tipo de ingreso
 
-CATEGORÍAS DE EGRESOS VÁLIDAS:
-- factura_servicios (luz, agua, gas, internet, teléfono)
-- supermercado
-- impuestos
-- alquiler
-- combustible
-- salud
-- entretenimiento
-- otro_egreso
+✅ CATEGORÍAS DE EGRESOS VÁLIDAS (elige UNA exactamente como está escrita):
+- factura_servicios → Luz, agua, gas, internet, teléfono, cable, streaming
+- supermercado → Compras de alimentos y productos del hogar
+- impuestos → ABL, Ganancias, IIBB, patentes, tasas municipales
+- alquiler → Pago de alquiler de vivienda o local
+- combustible → Nafta, gasoil, carga de combustible
+- salud → Médico, farmacia, obra social, prepaga, estudios
+- entretenimiento → Cine, restaurantes, delivery, ocio, suscripciones
+- otro_egreso → Cualquier otro tipo de egreso
 
-IMPORTANTE:
-- Si no puedes determinar algún campo, usa null
-- El monto debe ser solo número (sin símbolos de moneda)
-- La fecha debe estar en formato YYYY-MM-DD
-- Responde SOLO el JSON, sin explicaciones adicionales
+🔍 EJEMPLOS DE CLASIFICACIÓN CORRECTA:
+
+Ejemplo 1 - Factura de luz:
+{{
+  "tipo": "egreso",
+  "categoria": "factura_servicios",
+  "fecha": "2025-10-15",
+  "monto": 15750.50,
+  "emisor_receptor": "EDENOR",
+  "descripcion": "Factura de energía eléctrica período 09/2025",
+  "numero_comprobante": "0001-00045678",
+  "persona": null
+}}
+
+Ejemplo 2 - Recibo de sueldo:
+{{
+  "tipo": "ingreso",
+  "categoria": "sueldo",
+  "fecha": "2025-10-01",
+  "monto": 500000.00,
+  "emisor_receptor": "Empresa XYZ S.A.",
+  "descripcion": "Sueldo mensual octubre 2025",
+  "numero_comprobante": "REC-2025-10-001",
+  "persona": "Juan Pérez"
+}}
+
+Ejemplo 3 - Compra supermercado:
+{{
+  "tipo": "egreso",
+  "categoria": "supermercado",
+  "fecha": "2025-10-20",
+  "monto": 45680.25,
+  "emisor_receptor": "Carrefour",
+  "descripcion": "Compra semanal alimentos y limpieza",
+  "numero_comprobante": "T-2025-8745",
+  "persona": null
+}}
+
+⚠️ REGLAS ESTRICTAS DE VALIDACIÓN:
+- "tipo" debe ser EXACTAMENTE "ingreso" o "egreso" (en minúsculas)
+- "categoria" debe ser EXACTAMENTE una de las listadas (sin espacios extras, sin mayúsculas)
+- "monto" debe ser un NÚMERO positivo sin símbolos ($, AR$, etc.)
+- "fecha" debe estar en formato YYYY-MM-DD (año-mes-día con guiones)
+- Si NO puedes determinar un campo con certeza, usa null (sin comillas)
+- "persona" es opcional, úsalo si identificas a quién pertenece la transacción
+
+🚫 ERRORES COMUNES A EVITAR:
+- ❌ "factura de servicios" → ✅ "factura_servicios"
+- ❌ "Supermercado" → ✅ "supermercado"
+- ❌ "$1500.50" → ✅ 1500.50
+- ❌ "15/10/2025" → ✅ "2025-10-15"
+- ❌ Agregar texto explicativo fuera del JSON → ✅ Solo el JSON
+
+🎯 AHORA ANALIZA EL DOCUMENTO Y RESPONDE CON EL JSON:
 """
 
 # === VALIDACIÓN ===

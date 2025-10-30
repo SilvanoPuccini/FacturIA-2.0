@@ -298,8 +298,9 @@ class FacturiaOrchestrator:
                 logger.info(f"✓ Procesado con IA: {archivo_info['nombre_guardado']} -> {clasificacion['tipo']}/{clasificacion['categoria']}")
 
                 # Delay entre archivos para evitar rate limit de Gemini
-                time.sleep(5)
-                logger.info("⏳ Esperando 5s antes de procesar el siguiente archivo...")
+                # Free tier: 15 RPM = 1 request cada 4s. Usamos 15s para seguridad.
+                time.sleep(15)
+                logger.info("⏳ Esperando 15s antes de procesar el siguiente archivo...")
 
             except Exception as e:
                 logger.error(f"Error al procesar archivo {archivo_info.get('nombre_guardado')}: {e}")

@@ -50,7 +50,7 @@ class GeminiClassifier:
             }
 
             self.model = genai.GenerativeModel(
-                'gemini-1.5-pro',
+                'gemini-1.5-flash-8b',  # Modelo más rápido: 15 RPM (1 cada 4s)
                 generation_config=generation_config
             )
             logger.info("✅ Gemini Vision configurado correctamente")

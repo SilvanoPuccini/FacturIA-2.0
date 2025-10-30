@@ -50,7 +50,7 @@ class GeminiClassifier:
             }
 
             self.model = genai.GenerativeModel(
-                'gemini-1.5-flash',
+                'gemini-1.5-pro',
                 generation_config=generation_config
             )
             logger.info("✅ Gemini Vision configurado correctamente")

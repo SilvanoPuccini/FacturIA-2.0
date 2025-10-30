@@ -35,6 +35,7 @@ class Transaccion(Base):
     procesado_por_ia = Column(Boolean, default=False)
     confianza_clasificacion = Column(Float, nullable=True)
     requiere_revision = Column(Boolean, default=False)
+    razon_revision = Column(Text, nullable=True)
     editado_manualmente = Column(Boolean, default=False)
     fecha_ultima_edicion = Column(DateTime, nullable=True)
     fecha_creacion = Column(DateTime, default=func.now(), nullable=False)

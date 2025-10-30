@@ -288,8 +288,25 @@ class GeminiClassifier:
 
             texto_limpio = texto_limpio.strip()
 
-            # Parsear JSON
-            datos = json.loads(texto_limpio)
+            # Estrategia 1: Intentar parsear JSON normal
+            try:
+                datos = json.loads(texto_limpio)
+            except json.JSONDecodeError:
+                # Estrategia 2: Reemplazar comillas simples por dobles
+                # Pero con cuidado para no romper strings que contengan apóstrofes
+                import re
+                # Buscar el patrón de JSON con comillas simples
+                texto_corregido = texto_limpio.replace("'", '"')
+                try:
+                    datos = json.loads(texto_corregido)
+                except json.JSONDecodeError:
+                    # Estrategia 3: Intentar extraer con regex (último recurso)
+                    logger.warning("Usando extracción por regex como último recurso")
+                    import ast
+                    try:
+                        datos = ast.literal_eval(texto_limpio)
+                    except:
+                        raise json.JSONDecodeError("No se pudo parsear con ninguna estrategia", texto_limpio, 0)
 
             # Validar campos obligatorios
             campos_requeridos = ["tipo", "categoria", "monto"]

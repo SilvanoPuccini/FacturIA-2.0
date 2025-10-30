@@ -11,7 +11,7 @@ from pathlib import Path
 # Agregar src al path
 sys.path.insert(0, str(Path(__file__).parent))
 
-from src.database import DatabaseManager
+from src.database import Database
 from src.database.models import Transaccion, ArchivoProcesado
 
 def limpiar_base_datos():
@@ -31,7 +31,7 @@ def limpiar_base_datos():
         return
 
     # Conectar a la base de datos
-    db = DatabaseManager('sqlite:///facturia2.db')
+    db = Database('sqlite:///facturia2.db')
 
     try:
         with db.get_session() as session:
@@ -90,7 +90,7 @@ def limpiar_todo():
         return
 
     # Limpiar base de datos
-    db = DatabaseManager('sqlite:///facturia2.db')
+    db = Database('sqlite:///facturia2.db')
 
     try:
         with db.get_session() as session:
